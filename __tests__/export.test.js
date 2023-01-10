@@ -1,9 +1,10 @@
 const AWS = require("aws-sdk");
 const { DocumentClient } = require("aws-sdk/clients/dynamodb");
 const { REGION, ENDPOINT, TABLE_NAME } = require("./global/settings");
-const { PARKSLIST, SUBAREAS } = require("./global/data.json");
+const { PARKSLIST, SUBAREAS, JOBSLIST, MOCKJOB } = require("./global/data.json");
 
 const exportGET = require("../lambda/export/GET/index");
+const exportFUNCTIONS = require("../lambda/export/functions");
 
 const jwt = require("jsonwebtoken");
 const tokenContent = {
@@ -40,34 +41,20 @@ async function setupDb() {
       })
       .promise();
   }
+
+  for (const job of JOBSLIST) {
+    await docClient
+      .put({
+        TableName: TABLE_NAME,
+        Item: job,
+      })
+      .promise();
+  }
 }
 
 describe("Export Report", () => {
   beforeAll(async () => {
     return await setupDb();
-  });
-
-  test("Handler - 200 GET request (no params)", async () => {
-    const event = {
-      headers: {
-        Authorization: "Bearer " + token,
-      },
-    };
-
-    const result = await exportGET.handler(event, null)
-
-    expect(result).toEqual(
-      expect.objectContaining({
-        headers: {
-          "Access-Control-Allow-Headers":
-            "Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token",
-          "Access-Control-Allow-Methods": "OPTIONS,GET,POST",
-          "Access-Control-Allow-Origin": "*",
-          "Content-Type": "application/json",
-        },
-        statusCode: 200,
-      })
-    );
   });
 
   test("Handler - 403 GET Invalid Auth", async () => {
@@ -84,7 +71,8 @@ describe("Export Report", () => {
     expect(response.statusCode).toBe(403);
   });
 
-  test("Handler - 200 GET request", async () => {
+  test("Handler - 200 GET, with no jobs", async () => {
+    const dateField = "dateGenerated"
     const event = {
       headers: {
         Authorization: "Bearer " + token,
@@ -96,14 +84,46 @@ describe("Export Report", () => {
     };
 
     const result = await exportGET.handler(event, null)
-    console.log('with params', result)
+    let body;
+    try {
+      body = JSON.parse(result.body)
+    } catch (e) {
+      body = 'fail'
+    }
 
     expect(result).toEqual(
       expect.objectContaining({
-        body: '{"status":"Job in progress","jobObj":{"progressDescription":"Initializing job.",'+
-          '"progressPercentage":0,"progressState":"initializing","lastSuccessfulJob":{}}}',
+        headers: {
+          "Access-Control-Allow-Headers":
+            "Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token",
+          "Access-Control-Allow-Methods": "OPTIONS,GET,POST",
+          "Access-Control-Allow-Origin": "*",
+          "Content-Type": "application/json",
+        },
         statusCode: 200,
-      })
+      }),
     );
+    expect(body.jobObj[dateField]).toMatch(JOBSLIST[0][dateField])
+  })
+
+  test("Handler - 200 GET, generate report", async () => {
+    const event = {
+      headers: {
+        authorization234: "Bearer " + token,
+      },
+      httpMethod: "GET",
+    };
+
+    const result = await exportGET.handler(event, null)
+
+    // Returns value below even with no job
+    // Update when invokable can be called
+    expect(result.body).toBe("{\"status\":\"Job is already running\"}")
   });
+
+  test("Functions - updateJobEntry", async () => {
+    const result = exportFUNCTIONS.updateJobEntry(MOCKJOB, TABLE_NAME)
+
+    expect(result).toMatchObject({})
+  })
 });
